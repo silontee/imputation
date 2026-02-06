@@ -49,6 +49,8 @@ export interface ModelConfig {
     // TOTEM
     totemWindowSize?: number
     totemNormalization?: "zscore" | "minmax"
+    totemMergeMode?: "non_overlap" | "overlap"
+    totemStride?: number
     totemPreviewUpdates?: number
   }
 }

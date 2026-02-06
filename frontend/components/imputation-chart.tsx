@@ -31,7 +31,9 @@ interface ChartDataPoint {
   original: number | null
   imputed: number
   wasImputed: boolean
-  combined: number // For continuous line
+  combined: number
+  originalLine: number | null  // Original segments only
+  imputedLine: number | null   // Imputed segments + connection points
 }
 
 export function ImputationChart({ preview }: ImputationChartProps) {
@@ -51,13 +53,38 @@ export function ImputationChart({ preview }: ImputationChartProps) {
     }
 
     const data = preview.preview_data[selectedDate]
-    return data.timestamps.map((ts, i) => ({
-      timestamp: ts.split(" ")[1] || ts, // Show only time part if available
+    const points = data.timestamps.map((ts, i) => ({
+      timestamp: ts.split(" ")[1] || ts,
       original: data.original[i],
       imputed: data.imputed[i],
       wasImputed: data.original[i] === null,
       combined: data.original[i] !== null ? data.original[i] : data.imputed[i],
+      originalLine: null as number | null,
+      imputedLine: null as number | null,
     }))
+
+    // Calculate originalLine and imputedLine with connection points
+    for (let i = 0; i < points.length; i++) {
+      const curr = points[i]
+      const prev = points[i - 1]
+      const next = points[i + 1]
+
+      if (!curr.wasImputed) {
+        // Original point - always show on original line
+        curr.originalLine = curr.combined
+        // Also show on imputed line if adjacent to imputed (connection point)
+        const prevIsImputed = prev?.wasImputed
+        const nextIsImputed = next?.wasImputed
+        if (prevIsImputed || nextIsImputed) {
+          curr.imputedLine = curr.combined
+        }
+      } else {
+        // Imputed point - show on imputed line
+        curr.imputedLine = curr.combined
+      }
+    }
+
+    return points
   }, [preview, selectedDate])
 
   const stats = useMemo(() => {
@@ -164,31 +191,40 @@ export function ImputationChart({ preview }: ImputationChartProps) {
                 }}
               />
 
-              {/* Base continuous line (original + imputed connected) */}
+              {/* Original data segments (green) */}
               <Line
                 type="monotone"
-                dataKey="combined"
+                dataKey="originalLine"
                 stroke="hsl(var(--primary))"
                 strokeWidth={2}
                 dot={false}
-                connectNulls={true}
-                name="combined"
+                connectNulls={false}
+                name="original"
               />
 
-              {/* Overlay: imputed segments with different style */}
+              {/* Imputed segments + connection points (orange) */}
               <Line
                 type="monotone"
-                dataKey={(d: ChartDataPoint) => (d.wasImputed ? d.combined : null)}
+                dataKey="imputedLine"
                 stroke="hsl(var(--chart-2))"
-                strokeWidth={3}
-                strokeDasharray="6 4"
-                dot={{
-                  fill: "hsl(var(--chart-2))",
-                  stroke: "hsl(var(--background))",
-                  strokeWidth: 2,
-                  r: 5,
+                strokeWidth={2.5}
+                dot={(props) => {
+                  const { cx, cy, payload } = props
+                  if (payload?.wasImputed) {
+                    return (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={4}
+                        fill="hsl(var(--chart-2))"
+                        stroke="hsl(var(--background))"
+                        strokeWidth={2}
+                      />
+                    )
+                  }
+                  return <></>
                 }}
-                connectNulls={true}
+                connectNulls={false}
                 name="imputed"
               />
             </LineChart>

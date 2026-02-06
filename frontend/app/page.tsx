@@ -176,6 +176,8 @@ export default function ImputeXPage() {
                 ? {
                     window_size: p.totemWindowSize,
                     normalization: p.totemNormalization,
+                    merge_mode: p.totemMergeMode,
+                    stride: p.totemStride,
                     preview_updates: p.totemPreviewUpdates,
                   }
                 : { max_iter: p.maxIter, random_state: p.randomState, estimator: p.estimator }

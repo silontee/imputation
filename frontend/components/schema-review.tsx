@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -85,9 +85,27 @@ export function SchemaReview({ data, onBack, onStartJob, isLoading = false }: Sc
   // TOTEM params
   const [totemWindowSize, setTotemWindowSize] = useState(96)
   const [totemNormalization, setTotemNormalization] = useState<"zscore" | "minmax">("zscore")
+  const [totemMergeMode, setTotemMergeMode] = useState<"non_overlap" | "overlap">("non_overlap")
+  const [totemStride, setTotemStride] = useState(48)
   const [totemPreviewUpdates, setTotemPreviewUpdates] = useState(10)
   // Advanced options toggle
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  const totemStrideOptions = useMemo(() => {
+    const candidates = [
+      Math.max(1, Math.floor(totemWindowSize / 2)),
+      Math.max(1, Math.floor(totemWindowSize / 4)),
+      Math.max(1, Math.floor(totemWindowSize / 8)),
+    ].filter((v) => v < totemWindowSize)
+    return [...new Set(candidates)]
+  }, [totemWindowSize])
+
+  useEffect(() => {
+    if (totemMergeMode !== "overlap") return
+    if (totemStride <= 0 || totemStride >= totemWindowSize || !totemStrideOptions.includes(totemStride)) {
+      setTotemStride(totemStrideOptions[0] ?? Math.max(1, Math.floor(totemWindowSize / 2)))
+    }
+  }, [totemMergeMode, totemStride, totemStrideOptions, totemWindowSize])
 
   const filteredColumns = useMemo(() => {
     return columns.filter((col) => {
@@ -151,6 +169,8 @@ export function SchemaReview({ data, onBack, onStartJob, isLoading = false }: Sc
                 ? {
                     totemWindowSize,
                     totemNormalization,
+                    totemMergeMode,
+                    totemStride: totemMergeMode === "overlap" ? totemStride : totemWindowSize,
                     totemPreviewUpdates,
                   }
                 : { maxIter, randomState, estimator }
@@ -613,6 +633,46 @@ export function SchemaReview({ data, onBack, onStartJob, isLoading = false }: Sc
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-foreground">Window Mode</label>
+                    <Select
+                      value={totemMergeMode}
+                      onValueChange={(v) => setTotemMergeMode(v as "non_overlap" | "overlap")}
+                    >
+                      <SelectTrigger className="bg-secondary/50 border-border/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="non_overlap">Fast (Non-overlap)</SelectItem>
+                        <SelectItem value="overlap">Smooth (Overlap)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {totemMergeMode === "non_overlap"
+                        ? "가장 빠른 모드입니다. 경계 품질보다 처리 속도를 우선합니다."
+                        : "겹치는 구간을 평균 병합해 경계가 더 부드럽습니다. 대신 처리 시간이 늘어납니다."}
+                    </p>
+                  </div>
+                  {totemMergeMode === "overlap" && (
+                    <div className="space-y-2">
+                      <label className="text-sm text-foreground">Stride</label>
+                      <Select value={String(totemStride)} onValueChange={(v) => setTotemStride(Number(v))}>
+                        <SelectTrigger className="bg-secondary/50 border-border/50">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {totemStrideOptions.map((s) => (
+                            <SelectItem key={s} value={String(s)}>
+                              {s} steps
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        작을수록 더 부드럽지만 느려집니다. 1 ≤ stride &lt; window_size
+                      </p>
+                    </div>
+                  )}
                   {showAdvanced && (
                     <div className="space-y-2">
                       <label className="text-sm text-foreground">Preview Updates</label>
@@ -659,7 +719,7 @@ export function SchemaReview({ data, onBack, onStartJob, isLoading = false }: Sc
                     {model === "MEAN" && "Simple imputation using mean for numeric and mode for categorical."}
                     {model === "REGRESSION" && "Uses regression models to predict missing values."}
                     {model === "NAOMI" && "NAOMI uses a bidirectional LSTM with multiresolution decoding for sequence imputation."}
-                    {model === "TOTEM" && "TOTEM uses a pretrained VQVAE tokenizer to encode and decode time series for imputation."}
+                    {model === "TOTEM" && "TOTEM uses a pretrained VQVAE tokenizer. Non-overlap is faster, overlap gives smoother boundaries with higher cost."}
                   </p>
                 </div>
               </div>
