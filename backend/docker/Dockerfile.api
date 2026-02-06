@@ -1,0 +1,36 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Create virtual environment and install dependencies
+COPY requirements.txt .
+RUN uv venv /app/.venv && \
+    . /app/.venv/bin/activate && \
+    uv pip install -r requirements.txt
+
+# Set PATH to use venv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
+
+# Copy application code
+COPY . .
+
+# Create upload/result directories
+RUN mkdir -p /app/uploads /app/results
+
+# Copy and set entrypoint
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
