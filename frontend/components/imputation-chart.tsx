@@ -31,6 +31,7 @@ interface ChartDataPoint {
   original: number | null
   imputed: number
   wasImputed: boolean
+  combined: number // For continuous line
 }
 
 export function ImputationChart({ preview }: ImputationChartProps) {
@@ -55,6 +56,7 @@ export function ImputationChart({ preview }: ImputationChartProps) {
       original: data.original[i],
       imputed: data.imputed[i],
       wasImputed: data.original[i] === null,
+      combined: data.original[i] !== null ? data.original[i] : data.imputed[i],
     }))
   }, [preview, selectedDate])
 
@@ -108,11 +110,14 @@ export function ImputationChart({ preview }: ImputationChartProps) {
         {/* Legend */}
         <div className="flex items-center gap-6 mb-4 text-xs">
           <div className="flex items-center gap-1.5">
-            <div className="w-4 h-0.5 bg-primary" />
+            <div className="w-5 h-0.5 bg-primary rounded" />
             <span className="text-muted-foreground">Original Data</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-4 h-0.5 bg-chart-2" style={{ borderStyle: "dashed" }} />
+            <div className="flex items-center">
+              <div className="w-5 h-0.5 bg-chart-2 rounded" style={{ backgroundImage: "repeating-linear-gradient(90deg, hsl(var(--chart-2)) 0px, hsl(var(--chart-2)) 4px, transparent 4px, transparent 7px)" }} />
+              <div className="w-2 h-2 rounded-full bg-chart-2 -ml-0.5" />
+            </div>
             <span className="text-muted-foreground">Imputed Values ({stats.imputed})</span>
           </div>
         </div>
@@ -152,36 +157,38 @@ export function ImputationChart({ preview }: ImputationChartProps) {
                   if (name === "imputed" && point.wasImputed) {
                     return [value?.toFixed(2), "Imputed"]
                   }
-                  if (name === "original" && point.original !== null) {
+                  if (name === "combined" && !point.wasImputed) {
                     return [value?.toFixed(2), "Original"]
                   }
                   return [null, ""]
                 }}
               />
 
-              {/* Original data line */}
+              {/* Base continuous line (original + imputed connected) */}
               <Line
                 type="monotone"
-                dataKey="original"
+                dataKey="combined"
                 stroke="hsl(var(--primary))"
                 strokeWidth={2}
                 dot={false}
-                connectNulls={false}
-                name="original"
+                connectNulls={true}
+                name="combined"
               />
 
-              {/* Imputed values shown where original was null */}
+              {/* Overlay: imputed segments with different style */}
               <Line
                 type="monotone"
-                dataKey={(d: ChartDataPoint) => (d.wasImputed ? d.imputed : null)}
+                dataKey={(d: ChartDataPoint) => (d.wasImputed ? d.combined : null)}
                 stroke="hsl(var(--chart-2))"
-                strokeWidth={2}
-                strokeDasharray="5 5"
+                strokeWidth={3}
+                strokeDasharray="6 4"
                 dot={{
                   fill: "hsl(var(--chart-2))",
-                  r: 4,
+                  stroke: "hsl(var(--background))",
+                  strokeWidth: 2,
+                  r: 5,
                 }}
-                connectNulls={false}
+                connectNulls={true}
                 name="imputed"
               />
             </LineChart>
