@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 
-from app.services.imputation.base import BaseImputer
+from app.services.imputation.base import BaseImputer, JobCanceledError
 from app.services.imputation.naomi.trainer import train_naomi
 
 
@@ -33,11 +33,13 @@ class NAOMIImputer(BaseImputer):
         progress_callback: Optional[Callable] = None,
         impute_callback: Optional[Callable] = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ):
         super().__init__(params)
         self.progress_callback = progress_callback
         self.impute_callback = impute_callback
         self.log_callback = log_callback
+        self.cancel_callback = cancel_callback
 
     @property
     def name(self) -> str:
@@ -51,6 +53,8 @@ class NAOMIImputer(BaseImputer):
         feature_columns: List[str] | None = None,
     ) -> pd.DataFrame:
         result = df.copy()
+        if self.cancel_callback and self.cancel_callback():
+            raise JobCanceledError("Job canceled before NAOMI started")
 
         if not columns_to_impute:
             return result
@@ -124,6 +128,8 @@ class NAOMIImputer(BaseImputer):
         train_stride = max(1, epochs // max(1, preview_updates))
 
         def _train_progress(epoch: int, total_epochs: int, loss_val: float, model) -> None:
+            if self.cancel_callback and self.cancel_callback():
+                raise JobCanceledError("Job canceled during NAOMI training")
             if self.progress_callback is not None:
                 self.progress_callback(epoch, total_epochs, loss_val)
             if self.impute_callback is None:
@@ -190,11 +196,16 @@ class NAOMIImputer(BaseImputer):
             progress_callback=_train_progress,
         )
 
+        if self.cancel_callback and self.cancel_callback():
+            raise JobCanceledError("Job canceled before NAOMI imputation")
+
         # Impute
         preview_stride = self.params.get("preview_stride", None)
         stride = None
 
         def _emit_preview(step: int, total: int, x_scaled_step, filled_mask=None) -> None:
+            if self.cancel_callback and self.cancel_callback():
+                raise JobCanceledError("Job canceled during NAOMI imputation")
             nonlocal stride
             if self.impute_callback is None:
                 return

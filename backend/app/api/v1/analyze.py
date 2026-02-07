@@ -78,7 +78,7 @@ async def analyze(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     repo.add_log(job_id, f"File uploaded: {file.filename}")
     repo.add_log(job_id, f"CSV encoding detected: {enc}")
-    repo.add_log(job_id, "Missing values normalized: 0 and 'NA'")
+    repo.add_log(job_id, "Missing values normalized: 'NA'")
     repo.add_log(job_id, f"Analyzed {len(df)} rows, {len(columns)} columns")
 
     return AnalyzeResponse(

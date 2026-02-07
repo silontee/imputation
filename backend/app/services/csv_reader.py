@@ -57,7 +57,7 @@ def read_csv_with_fallback(
 
 
 def normalize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Treat 0 and 'NA' (case-insensitive) as missing values."""
+    """Treat 'NA' (case-insensitive) as missing values."""
     out = df.copy()
 
     # String/object columns: treat 'NA' as missing
@@ -67,10 +67,5 @@ def normalize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
         mask_na = s.str.upper().eq("NA")
         if mask_na.any():
             out.loc[mask_na, col] = np.nan
-
-    # Numeric columns: treat 0 as missing
-    num_cols = out.select_dtypes(include=["number"]).columns
-    for col in num_cols:
-        out.loc[out[col] == 0, col] = np.nan
 
     return out

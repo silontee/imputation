@@ -25,3 +25,8 @@ celery_app.conf.update(
 def enqueue_imputation_task(job_id: str):
     """Send an imputation task to the Celery worker."""
     celery_app.send_task("worker.tasks.run_imputation", args=[job_id])
+
+
+def enqueue_augmentation_task(job_id: str):
+    """Send an augmentation task to the Celery worker."""
+    celery_app.send_task("worker.tasks.run_augmentation", args=[job_id])

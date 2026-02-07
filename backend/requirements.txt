@@ -13,3 +13,4 @@ alembic==1.13.2
 celery==5.4.0
 redis==5.0.8
 torch==2.2.2
+imbalanced-learn==0.12.4

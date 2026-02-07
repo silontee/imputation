@@ -13,7 +13,9 @@ from app.services.imputation.knn import KNNMethodImputer
 from app.services.imputation.statistical import MeanModeImputer
 from app.services.csv_reader import read_csv_with_fallback, ENCODING_CANDIDATES
 from app.services.imputation.naomi import NAOMIImputer
+from app.services.imputation.base import JobCanceledError
 from app.services.imputation.totem import TOTEMImputer
+from app.services.augmentation.smotenc import run_smotenc_augmentation
 
 
 def get_imputer(model_type: str, params: dict):
@@ -35,7 +37,7 @@ def generate_imputation_preview(
     result_df: pd.DataFrame,
     columns_to_impute: List[str],
     datetime_col: Optional[str] = None,
-    max_dates: int = 5,
+    max_dates: Optional[int] = None,
     max_points_per_date: int = 100,
 ) -> Dict[str, Any]:
     """Generate preview data for visualization.
@@ -119,8 +121,9 @@ def generate_imputation_preview(
     if not dates_with_missing:
         return preview
     
-    # Limit to max_dates
-    dates_with_missing = dates_with_missing[:max_dates]
+    # Limit to max_dates if provided
+    if max_dates is not None:
+        dates_with_missing = dates_with_missing[:max_dates]
     preview["dates_with_missing"] = dates_with_missing
     
     # Generate preview for each date
@@ -158,6 +161,8 @@ def run_imputation(self, job_id: str):
         job = repo.get(job_id)
         if not job:
             return {"error": f"Job {job_id} not found"}
+        if job.status == JobStatus.CANCELED.value:
+            return {"status": "canceled", "job_id": job_id}
 
         repo.update(job_id, status=JobStatus.PROCESSING.value, progress=5, stage="Reading data")
         repo.add_log(job_id, "Starting imputation process")
@@ -166,7 +171,7 @@ def run_imputation(self, job_id: str):
         try:
             df, enc = read_csv_with_fallback(job.input_path)
             repo.add_log(job_id, f"CSV encoding detected: {enc}")
-            repo.add_log(job_id, "Missing values normalized: 0 and 'NA'")
+            repo.add_log(job_id, "Missing values normalized: 'NA'")
         except Exception as e:
             if isinstance(e, (UnicodeDecodeError, ValueError)):
                 tried = ", ".join(ENCODING_CANDIDATES)
@@ -239,12 +244,17 @@ def run_imputation(self, job_id: str):
                 imputation_preview=imputation_preview,
             )
 
+        def _is_canceled() -> bool:
+            latest = repo.get(job_id)
+            return latest is not None and latest.status == JobStatus.CANCELED.value
+
         if model_type == "NAOMI":
             imputer = NAOMIImputer(
                 params=model_params,
                 progress_callback=naomi_progress,
                 impute_callback=naomi_impute_progress,
                 log_callback=lambda msg: repo.add_log(job_id, msg),
+                cancel_callback=_is_canceled,
             )
         elif model_type == "TOTEM":
             imputer = TOTEMImputer(
@@ -295,10 +305,27 @@ def run_imputation(self, job_id: str):
 
         return {"status": "completed", "job_id": job_id}
 
+    except JobCanceledError:
+        repo2 = JobRepository(SessionLocal())
+        try:
+            repo2.update(
+                job_id,
+                status=JobStatus.CANCELED.value,
+                stage="Canceled",
+            )
+            repo2.add_log(job_id, "Job canceled during NAOMI processing")
+        finally:
+            repo2.db.close()
+        return {"status": "canceled", "job_id": job_id}
     except Exception as e:
         db2 = SessionLocal()
         try:
             repo2 = JobRepository(db2)
+            current = repo2.get(job_id)
+            if current and current.status == JobStatus.CANCELED.value:
+                repo2.update(job_id, status=JobStatus.CANCELED.value, stage="Canceled")
+                repo2.add_log(job_id, "Job canceled by user")
+                return {"status": "canceled", "job_id": job_id}
             repo2.update(
                 job_id,
                 status=JobStatus.FAILED.value,
@@ -306,6 +333,116 @@ def run_imputation(self, job_id: str):
                 stage="Failed",
             )
             repo2.add_log(job_id, f"Error: {str(e)}")
+        finally:
+            db2.close()
+        return {"status": "failed", "job_id": job_id, "error": str(e)}
+
+    finally:
+        db.close()
+
+
+@celery.task(name="worker.tasks.run_augmentation", bind=True, max_retries=2)
+def run_augmentation(self, job_id: str):
+    """Run SMOTENC augmentation as a Celery task."""
+    db = SessionLocal()
+    try:
+        repo = JobRepository(db)
+        job = repo.get(job_id)
+        if not job:
+            return {"error": f"Job {job_id} not found"}
+
+        repo.update(
+            job_id,
+            augment_status="PROCESSING",
+            augment_progress=5,
+            augment_stage="Loading data",
+        )
+        repo.add_log(job_id, "[Augment] Starting SMOTENC augmentation")
+
+        # Load the imputed result CSV
+        output_path = job.output_path
+        if not output_path:
+            raise Exception("No imputation result found. Run imputation first.")
+
+        df, enc = read_csv_with_fallback(output_path)
+        repo.add_log(job_id, f"[Augment] Loaded imputed data: {len(df)} rows, encoding={enc}")
+        repo.update(job_id, augment_progress=10, augment_stage="Preparing")
+
+        # Get augment params
+        params = job.augment_params or {}
+        label_column = params.get("label_column")
+        feature_columns = params.get("feature_columns", [])
+        categorical_feature_columns = params.get("categorical_feature_columns", [])
+        window_size = params.get("window_size", 48)
+        stride = params.get("stride", 4)
+        k_neighbors = params.get("k_neighbors", 5)
+        sampling_strategy = params.get("sampling_strategy", "auto")
+        random_state = params.get("random_state", 42)
+
+        if not label_column:
+            raise Exception("label_column is required for augmentation")
+        if not feature_columns:
+            raise Exception("feature_columns is required for augmentation")
+
+        def aug_progress(step, total, msg):
+            pct = 10 + int((step / total) * 80)
+            repo.update(
+                job_id,
+                augment_progress=pct,
+                augment_stage=msg,
+            )
+
+        def aug_log(msg):
+            repo.add_log(job_id, f"[Augment] {msg}")
+
+        # Run SMOTENC
+        result = run_smotenc_augmentation(
+            df=df,
+            label_column=label_column,
+            feature_columns=feature_columns,
+            categorical_feature_columns=categorical_feature_columns,
+            window_size=window_size,
+            stride=stride,
+            k_neighbors=k_neighbors,
+            sampling_strategy=sampling_strategy,
+            random_state=random_state,
+            progress_callback=aug_progress,
+            log_callback=aug_log,
+        )
+
+        augmented_df = result["augmented_df"]
+        preview = result["preview"]
+        preview["class_distribution"]["after"] = result["class_distribution_after"]
+
+        # Save augmented CSV
+        aug_output_path = settings.RESULT_DIR / f"{job_id}_smotenc.csv"
+        augmented_df.to_csv(aug_output_path, index=False)
+        repo.add_log(job_id, f"[Augment] Result saved to {aug_output_path.name}")
+
+        # Update job with results
+        repo.update(
+            job_id,
+            augment_status="COMPLETED",
+            augment_progress=100,
+            augment_stage="Complete",
+            augment_output_path=str(aug_output_path),
+            augment_preview=preview,
+        )
+        repo.add_log(job_id, "[Augment] Augmentation completed successfully")
+
+        return {"status": "completed", "job_id": job_id}
+
+    except Exception as e:
+        db2 = SessionLocal()
+        try:
+            repo2 = JobRepository(db2)
+            repo2.update(
+                job_id,
+                augment_status="FAILED",
+                augment_error=str(e),
+                augment_stage="Failed",
+            )
+            repo2.add_log(job_id, f"[Augment] Error: {str(e)}")
         finally:
             db2.close()
         return {"status": "failed", "job_id": job_id, "error": str(e)}

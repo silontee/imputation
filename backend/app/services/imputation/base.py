@@ -33,3 +33,7 @@ class BaseImputer(ABC):
     def name(self) -> str:
         """Return the name of the imputation method."""
         pass
+
+
+class JobCanceledError(Exception):
+    """Raised when a job is canceled during processing."""

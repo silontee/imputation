@@ -196,7 +196,7 @@ class ImputationPreviewData(BaseModel):
     column_name: str
     timestamps: List[str]
     original: List[Optional[float]]
-    imputed: List[float]
+    imputed: List[Optional[float]]
 
 
 class ImputationPreview(BaseModel):

@@ -31,6 +31,16 @@ class ImputationJob(Base):
     error_message = Column(Text, nullable=True)
     logs = Column(JSONB, nullable=True, default=list)
     imputation_preview = Column(JSONB, nullable=True, default=dict)
+
+    # Augmentation fields
+    augment_status = Column(String(20), nullable=True, default="IDLE")
+    augment_params = Column(JSONB, nullable=True, default=dict)
+    augment_output_path = Column(Text, nullable=True)
+    augment_progress = Column(Integer, nullable=True, default=0)
+    augment_stage = Column(String(50), nullable=True, default="")
+    augment_error = Column(Text, nullable=True)
+    augment_preview = Column(JSONB, nullable=True, default=dict)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
