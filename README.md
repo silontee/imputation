@@ -15,11 +15,13 @@
 - [시스템 아키텍처](#시스템-아키텍처)
 - [데이터 처리 흐름](#데이터-처리-흐름)
 - [Imputation 알고리즘](#imputation-알고리즘)
+- [데이터 증강 (SMOTENC)](#데이터-증강-smotenc)
 - [컬럼 역할 시스템](#컬럼-역할-시스템)
 - [GPU 지원](#gpu-지원)
 - [API 엔드포인트](#api-엔드포인트)
 - [프로젝트 구조](#프로젝트-구조)
 - [빠른 시작](#빠른-시작)
+- [DB 마이그레이션](#db-마이그레이션)
 - [환경 변수](#환경-변수)
 
 ---
@@ -182,6 +184,32 @@ sequenceDiagram
     API-->>U: 보정된 CSV 파일
 ```
 
+### Step 4. (선택) Time Series 증강(SMOTENC)
+
+Imputation 완료 후, **Time Series 증강**을 선택적으로 수행할 수 있습니다.  
+증강은 **슬라이딩 윈도우 기반 벡터화 → SMOTENC 적용 → 합성 윈도우 생성** 흐름으로 진행되며,  
+웹 UI에서는 **원본 + 증강 결과를 오버레이 차트로 동적 시각화**합니다.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend
+    participant API as FastAPI
+    participant DB as PostgreSQL
+    participant WK as Celery Worker
+
+    U->>FE: 증강 설정 입력 (label, categorical 등)
+    FE->>API: POST /api/v1/jobs/{job_id}/augment
+    API->>DB: 증강 상태/파라미터 기록
+    API-->>FE: 202 Accepted
+    WK->>DB: 증강 진행률 업데이트
+    WK->>WK: 슬라이딩 윈도우 → SMOTENC → 합성 윈도우
+    WK->>DB: 증강 결과 저장 (CSV/preview)
+    FE->>API: GET /api/v1/jobs/{job_id}/augment/status
+    API-->>FE: 진행률/preview
+    FE-->>U: 오버레이 차트 표시 + 다운로드 버튼
+```
+
 ---
 
 ## Imputation 알고리즘
@@ -262,6 +290,22 @@ flowchart TD
     J -->|Yes| K["ID"]
     J -->|No| L["CATEGORICAL"]
 ```
+
+---
+
+## 데이터 증강 (SMOTENC)
+
+Time Series 데이터를 대상으로 **SMOTENC** 기반 증강을 지원합니다.  
+특성(feature)에 범주형이 포함될 수 있어 **SMOTENC**를 사용하며, 라벨은 분류형이어야 합니다.
+
+### 핵심 개념
+- **슬라이딩 윈도우**: 시계열을 `window_size`와 `stride`로 구간 분할
+- **벡터화 + SMOTENC**: 윈도우를 특성 벡터로 변환 후 증강
+- **시각화**: 원본(파란선) + 증강(주황선) **오버레이 차트**
+
+### 제약
+- 시계열 연속성을 직접 보장하지 않음 → **윈도우 기반 합성**으로 접근
+- 라벨 컬럼과 범주형 특성 컬럼은 **명시적으로 지정** 필요
 
 ---
 
@@ -347,6 +391,14 @@ curl -X POST "http://localhost/api/v1/analyze" \
 | `GET` | `/api/v1/jobs/{job_id}` | 작업 상태 조회 (진행률, 로그, 미리보기) |
 | `GET` | `/api/v1/jobs/{job_id}/download` | 결과 파일 다운로드 |
 | `DELETE` | `/api/v1/jobs/{job_id}` | 작업 취소 |
+
+### 증강 (SMOTENC) - 설계 반영
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| `POST` | `/api/v1/jobs/{job_id}/augment` | 증강 작업 시작 |
+| `GET` | `/api/v1/jobs/{job_id}/augment/status` | 증강 상태 조회 |
+| `GET` | `/api/v1/jobs/{job_id}/augment/download` | 증강 결과 다운로드 |
 
 ### 작업 시작 요청 예시
 
@@ -539,6 +591,23 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 # 개발 모드 (소스 코드 핫리로드)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
+
+---
+
+## DB 마이그레이션
+
+`ImputationJob` 테이블에 **증강 관련 컬럼 7개**가 추가되어, 기존 DB 사용 시 마이그레이션이 필요합니다.  
+운영/데이터 유지가 필요하면 **Alembic 마이그레이션**을 권장합니다.
+
+### Alembic 실행 (예시)
+
+```bash
+cd backend
+python -m alembic upgrade head
+```
+
+### 개발 환경 대안
+- 데이터 보존이 필요 없으면 DB를 재생성해도 됩니다.
 
 ---
 
