@@ -1,6 +1,7 @@
 import React from "react"
 import type { Metadata } from 'next'
 import { Poppins, IBM_Plex_Mono } from 'next/font/google'
+import { Toaster } from "@/components/ui/toaster"
 
 import './globals.css'
 
@@ -30,6 +31,7 @@ export default function RootLayout({
     <html lang="ko">
       <body className={`${poppins.variable} ${ibmPlexMono.variable} font-sans antialiased bg-background text-foreground min-h-screen`}>
         {children}
+        <Toaster />
       </body>
     </html>
   )

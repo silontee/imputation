@@ -13,7 +13,8 @@ import {
   Circle,
   Loader2,
   Eye,
-  EyeOff
+  EyeOff,
+  Zap,
 } from "lucide-react"
 import type { JobInfo } from "@/app/page"
 import { useState } from "react"
@@ -24,12 +25,13 @@ interface ProcessingViewProps {
   onCancel: () => void
   onNewJob: () => void
   onDownload?: () => void
+  onAugment?: () => void
   isComplete: boolean
 }
 
 const stages = ["Preprocess", "Encode", "Impute", "Export"]
 
-export function ProcessingView({ jobInfo, onCancel, onNewJob, onDownload, isComplete }: ProcessingViewProps) {
+export function ProcessingView({ jobInfo, onCancel, onNewJob, onDownload, onAugment, isComplete }: ProcessingViewProps) {
   const [showMissingOnly, setShowMissingOnly] = useState(true)
   const [visibleRows, setVisibleRows] = useState(200)
 
@@ -271,9 +273,11 @@ export function ProcessingView({ jobInfo, onCancel, onNewJob, onDownload, isComp
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
-                className="gap-2"
+                onClick={onAugment}
+                className="gap-2 border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50"
               >
-                View details
+                <Zap className="w-4 h-4" />
+                Augment (SMOTENC)
               </Button>
               <Button
                 onClick={onDownload}

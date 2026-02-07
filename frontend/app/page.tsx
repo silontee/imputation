@@ -5,10 +5,12 @@ import { Header } from "@/components/header"
 import { FileUpload } from "@/components/file-upload"
 import { SchemaReview } from "@/components/schema-review"
 import { ProcessingView } from "@/components/processing-view"
+import { AugmentationPanel } from "@/components/augmentation-panel"
 import type { SchemaReviewData, JobConfig, ColumnProfile } from "@/types/schema"
 import { api, type AnalyzeResponse, type JobStatusResponse, type ImputationPreview } from "@/lib/api"
+import { toast } from "@/hooks/use-toast"
 
-export type AppState = "upload" | "schema" | "processing" | "complete"
+export type AppState = "upload" | "schema" | "processing" | "complete" | "augment"
 
 export interface ColumnInfo {
   name: string
@@ -74,7 +76,21 @@ export default function ImputeXPage() {
   const [jobInfo, setJobInfo] = useState<JobInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollingDelayRef = useRef(1000)
+  const lastStatusRef = useRef<{
+    progress: number
+    stage: string
+    status: string
+    logsLen: number
+  } | null>(null)
+
+  const clearPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearTimeout(pollingRef.current)
+      pollingRef.current = null
+    }
+  }, [])
 
   // Handle file upload -> analyze and go to schema review
   const handleFileAnalyze = useCallback(async (file: File) => {
@@ -128,21 +144,48 @@ export default function ImputeXPage() {
 
       if (status.status === "COMPLETED") {
         setAppState("complete")
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current)
-          pollingRef.current = null
-        }
+        clearPolling()
+        return
       } else if (status.status === "FAILED") {
         setError(status.error_message || "Job failed")
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current)
-          pollingRef.current = null
-        }
+        clearPolling()
+        return
       }
+
+      const nextSnapshot = {
+        progress: status.progress,
+        stage: status.stage || "",
+        status: status.status,
+        logsLen: status.logs?.length ?? 0,
+      }
+      const prevSnapshot = lastStatusRef.current
+      const changed = !prevSnapshot
+        || prevSnapshot.progress !== nextSnapshot.progress
+        || prevSnapshot.stage !== nextSnapshot.stage
+        || prevSnapshot.status !== nextSnapshot.status
+        || prevSnapshot.logsLen !== nextSnapshot.logsLen
+
+      lastStatusRef.current = nextSnapshot
+      const minDelay = 1000
+      const maxDelay = 5000
+      pollingDelayRef.current = changed
+        ? minDelay
+        : Math.min(maxDelay, pollingDelayRef.current * 2)
+
+      clearPolling()
+      pollingRef.current = setTimeout(() => {
+        pollJobStatus(jobId)
+      }, pollingDelayRef.current)
     } catch (err) {
       console.error("Failed to poll job status:", err)
+      const maxDelay = 5000
+      pollingDelayRef.current = Math.min(maxDelay, pollingDelayRef.current * 2)
+      clearPolling()
+      pollingRef.current = setTimeout(() => {
+        pollJobStatus(jobId)
+      }, pollingDelayRef.current)
     }
-  }, [])
+  }, [clearPolling])
 
   // Handle start job from schema review
   const handleStartJob = useCallback(async (config: JobConfig) => {
@@ -220,10 +263,13 @@ export default function ImputeXPage() {
       setJobInfo(newJob)
       setAppState("processing")
 
-      // Start polling for job status
-      pollingRef.current = setInterval(() => {
+      // Start polling for job status (with backoff)
+      pollingDelayRef.current = 1000
+      lastStatusRef.current = null
+      clearPolling()
+      pollingRef.current = setTimeout(() => {
         pollJobStatus(schemaData.jobId)
-      }, 1000)
+      }, pollingDelayRef.current)
 
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start job")
@@ -234,16 +280,22 @@ export default function ImputeXPage() {
 
   // Cancel job
   const handleCancel = useCallback(async () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current)
-      pollingRef.current = null
-    }
+    clearPolling()
 
     if (jobInfo) {
       try {
         await api.cancelJob(jobInfo.id)
+        toast({
+          title: "작업이 중지됨",
+          description: "보간 처리를 중단했습니다.",
+        })
       } catch (err) {
         console.error("Failed to cancel job:", err)
+        toast({
+          title: "중지 실패",
+          description: "작업 중지 요청에 실패했습니다.",
+          variant: "destructive",
+        })
       }
     }
 
@@ -255,10 +307,7 @@ export default function ImputeXPage() {
 
   // New job
   const handleNewJob = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current)
-      pollingRef.current = null
-    }
+    clearPolling()
 
     setAppState("upload")
     setJobInfo(null)
@@ -273,14 +322,22 @@ export default function ImputeXPage() {
     }
   }, [jobInfo])
 
+  // Go to augmentation
+  const handleAugment = useCallback(() => {
+    setAppState("augment")
+  }, [])
+
+  // Back from augmentation
+  const handleBackFromAugment = useCallback(() => {
+    setAppState("complete")
+  }, [])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current)
-      }
+      clearPolling()
     }
-  }, [])
+  }, [clearPolling])
 
   return (
     <div className="min-h-screen bg-background">
@@ -317,7 +374,16 @@ export default function ImputeXPage() {
             onCancel={handleCancel}
             onNewJob={handleNewJob}
             onDownload={handleDownload}
+            onAugment={handleAugment}
             isComplete={appState === "complete"}
+          />
+        )}
+
+        {appState === "augment" && jobInfo && schemaData && (
+          <AugmentationPanel
+            jobId={jobInfo.id}
+            columns={schemaData.columns}
+            onBack={handleBackFromAugment}
           />
         )}
       </main>

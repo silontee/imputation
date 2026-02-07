@@ -13,13 +13,21 @@ import {
   ReferenceDot,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import { Check, ChevronsUpDown } from "lucide-react"
 import type { ImputationPreview } from "@/lib/api"
 
 interface ImputationChartProps {
@@ -38,6 +46,7 @@ interface ChartDataPoint {
 
 export function ImputationChart({ preview }: ImputationChartProps) {
   const [selectedDate, setSelectedDate] = useState<string>("")
+  const [dateOpen, setDateOpen] = useState(false)
 
   // Set or reset selected date when preview changes
   useEffect(() => {
@@ -94,6 +103,7 @@ export function ImputationChart({ preview }: ImputationChartProps) {
   }, [chartData])
 
   const columnName = preview?.preview_data[selectedDate]?.column_name || "Value"
+  const dates = preview?.dates_with_missing ?? []
 
   if (!preview || !preview.dates_with_missing?.length) {
     return (
@@ -118,18 +128,44 @@ export function ImputationChart({ preview }: ImputationChartProps) {
             Imputation Visualization - {columnName}
           </CardTitle>
           <div className="flex items-center gap-4">
-            <Select value={selectedDate} onValueChange={setSelectedDate}>
-              <SelectTrigger className="w-40 h-8 text-xs bg-secondary/50 border-border/50">
-                <SelectValue placeholder="Select date" />
-              </SelectTrigger>
-              <SelectContent>
-                {preview.dates_with_missing.map((date) => (
-                  <SelectItem key={date} value={date}>
-                    {date}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={dateOpen} onOpenChange={setDateOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={dateOpen}
+                  className="w-48 h-8 justify-between text-xs bg-secondary/50 border-border/50"
+                >
+                  {selectedDate || "Select date"}
+                  <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-56 p-0">
+                <Command>
+                  <CommandInput placeholder="Search date..." />
+                  <CommandList className="max-h-64">
+                    <CommandEmpty>No dates found.</CommandEmpty>
+                    <CommandGroup>
+                      {dates.map((date) => (
+                        <CommandItem
+                          key={date}
+                          value={date}
+                          onSelect={(value) => {
+                            setSelectedDate(value)
+                            setDateOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={`mr-2 h-4 w-4 ${selectedDate === date ? "opacity-100" : "opacity-0"}`}
+                          />
+                          {date}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       </CardHeader>

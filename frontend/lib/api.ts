@@ -34,7 +34,7 @@ export interface ImputationPreviewData {
   column_name: string
   timestamps: string[]
   original: (number | null)[]
-  imputed: number[]
+  imputed: (number | null)[]
 }
 
 export interface ImputationPreview {
@@ -51,6 +51,46 @@ export interface JobStatusResponse {
   error_message: string | null
   logs: string[]
   imputation_preview: ImputationPreview | null
+}
+
+// Augmentation types
+export interface AugmentRequest {
+  label_column: string
+  feature_columns: string[]
+  categorical_feature_columns: string[]
+  window_size: number
+  stride: number
+  k_neighbors: number
+  sampling_strategy: string | number
+  random_state: number
+}
+
+export interface AugmentColumnPreview {
+  original: (number | null)[]
+  synthetic: (number | null)[]
+}
+
+export interface AugmentPreview {
+  original_count: number
+  synthetic_count: number
+  original_windows: number
+  synthetic_windows: number
+  columns: Record<string, AugmentColumnPreview>
+  class_distribution: {
+    before: Record<string, number>
+    after: Record<string, number>
+  }
+}
+
+export interface AugmentStatusResponse {
+  job_id: string
+  augment_status: "IDLE" | "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED"
+  augment_progress: number
+  augment_stage: string
+  augment_download_url: string | null
+  augment_error: string | null
+  augment_preview: AugmentPreview | null
+  logs: string[]
 }
 
 class ApiClient {
@@ -118,6 +158,38 @@ class ApiClient {
 
   getDownloadUrl(jobId: string): string {
     return `${this.baseUrl}/jobs/${jobId}/download`
+  }
+
+  // --- Augmentation API ---
+
+  async startAugmentation(jobId: string, request: AugmentRequest): Promise<{ job_id: string; status: string }> {
+    const response = await fetch(`${this.baseUrl}/jobs/${jobId}/augment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Unknown error" }))
+      throw new Error(error.detail || `HTTP ${response.status}`)
+    }
+
+    return response.json()
+  }
+
+  async getAugmentStatus(jobId: string): Promise<AugmentStatusResponse> {
+    const response = await fetch(`${this.baseUrl}/jobs/${jobId}/augment`)
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Unknown error" }))
+      throw new Error(error.detail || `HTTP ${response.status}`)
+    }
+
+    return response.json()
+  }
+
+  getAugmentDownloadUrl(jobId: string): string {
+    return `${this.baseUrl}/jobs/${jobId}/augment/download`
   }
 }
 

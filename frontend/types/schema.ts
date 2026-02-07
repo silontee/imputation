@@ -63,3 +63,15 @@ export interface JobConfig {
     role: ColumnRole
   }[]
 }
+
+// Augmentation types
+export interface AugmentConfig {
+  label_column: string
+  feature_columns: string[]
+  categorical_feature_columns: string[]
+  window_size: number
+  stride: number
+  k_neighbors: number
+  sampling_strategy: string | number
+  random_state: number
+}
