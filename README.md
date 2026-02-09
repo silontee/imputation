@@ -1,4 +1,4 @@
-# Impute platform- Missing Value Imputation Platform
+# Impute platform - Missing Value Imputation Platform
 
 > 결측치(Missing Value) 자동 보정을 위한 풀스택 웹 애플리케이션
 
